@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Slug } from "@opencode-ai/core/util/slug"
+import { realpathSync } from "fs"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
@@ -52,6 +53,17 @@ export function isDefaultTitle(title: string) {
   return new RegExp(
     `^(${parentTitlePrefix}|${childTitlePrefix})\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$`,
   ).test(title)
+}
+
+export function directoryMatchCondition(directory: string): SQL {
+  if (process.platform !== "win32") return eq(SessionTable.directory, directory)
+  const alternatives = [directory]
+  try {
+    const real = realpathSync(directory)
+    if (real !== directory && !alternatives.includes(real)) alternatives.push(real)
+  } catch {}
+  if (alternatives.length === 1) return eq(SessionTable.directory, directory)
+  return or(...alternatives.map((d) => eq(SessionTable.directory, d)))!
 }
 
 type SessionRow = typeof SessionTable.$inferSelect
@@ -975,13 +987,13 @@ function listByProject(
 
       conditions.push(
         input.directory
-          ? or(...conds, and(isNull(SessionTable.path), eq(SessionTable.directory, input.directory))!)!
+          ? or(...conds, and(isNull(SessionTable.path), directoryMatchCondition(input.directory))!)!
           : or(...conds)!,
       )
     }
   } else if (input.scope !== "project") {
     if (input.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
+      conditions.push(directoryMatchCondition(input.directory))
     }
   }
   if (input.roots) {

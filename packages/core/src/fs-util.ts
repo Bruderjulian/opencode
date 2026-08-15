@@ -225,11 +225,18 @@ export namespace FSUtil {
     return lookup(p) || "application/octet-stream"
   }
 
+  // On Windows a mapped network drive (e.g. Z:) resolves via realpath to its UNC
+  // target (\\server\share); keep the drive-letter form so paths stay consistent.
+  export function keepMappedDrive(resolved: string, real: string): string {
+    if (/^[A-Za-z]:/.test(resolved) && (real.startsWith("\\\\") || real.startsWith("//"))) return resolved
+    return real
+  }
+
   export function normalizePath(p: string): string {
     if (process.platform !== "win32") return p
     const resolved = pathResolve(windowsPath(p))
     try {
-      return realpathSync.native(resolved)
+      return keepMappedDrive(resolved, realpathSync.native(resolved))
     } catch {
       return resolved
     }
@@ -247,9 +254,9 @@ export namespace FSUtil {
   export function resolve(p: string): string {
     const resolved = pathResolve(windowsPath(p))
     try {
-      return normalizePath(realpathSync(resolved))
+      return normalizePath(keepMappedDrive(resolved, realpathSync(resolved)))
     } catch (e: any) {
-      if (e?.code === "ENOENT") return normalizePath(resolved)
+      if (process.platform === "win32" || e?.code === "ENOENT") return normalizePath(resolved)
       throw e
     }
   }

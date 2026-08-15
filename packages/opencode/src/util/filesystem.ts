@@ -116,7 +116,7 @@ export function normalizePath(p: string): string {
   if (process.platform !== "win32") return p
   const resolved = win32.normalize(win32.resolve(windowsPath(p)))
   try {
-    return realpathSync.native(resolved)
+    return FSUtil.keepMappedDrive(resolved, realpathSync.native(resolved))
   } catch {
     return resolved
   }
@@ -137,9 +137,9 @@ export function normalizePathPattern(p: string): string {
 export function resolve(p: string): string {
   const resolved = pathResolve(windowsPath(p))
   try {
-    return normalizePath(realpathSync(resolved))
+    return normalizePath(FSUtil.keepMappedDrive(resolved, realpathSync(resolved)))
   } catch (e) {
-    if (isEnoent(e)) return normalizePath(resolved)
+    if (process.platform === "win32" || isEnoent(e)) return normalizePath(resolved)
     throw e
   }
 }

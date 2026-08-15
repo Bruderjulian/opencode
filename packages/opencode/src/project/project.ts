@@ -21,6 +21,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { directoryMatchCondition } from "@/session/session"
 import { Project } from "@opencode-ai/schema/project"
 
 export const Info = Project.Info
@@ -292,7 +293,7 @@ const layer = Layer.effect(
         yield* db
           .update(SessionTable)
           .set({ project_id: projectID })
-          .where(and(eq(SessionTable.project_id, ProjectV2.ID.global), eq(SessionTable.directory, data.directory)))
+          .where(and(eq(SessionTable.project_id, ProjectV2.ID.global), directoryMatchCondition(data.directory)))
           .run()
           .pipe(Effect.orDie)
       }
