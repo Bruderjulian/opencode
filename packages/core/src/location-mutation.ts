@@ -81,14 +81,18 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const location = yield* Location.Service
-    const locationRoot = yield* fs.realPath(location.directory)
+    const locationRoot = yield* fs.realPath(location.directory).pipe(
+      Effect.map((real) => FSUtil.keepMappedDrive(location.directory, real)),
+    )
 
     function notFound<A>(effect: Effect.Effect<A, FSUtil.Error>) {
       return effect.pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
     }
 
     const resolvePath = Effect.fnUntraced(function* (absolute: string) {
-      const existing = yield* notFound(fs.realPath(absolute))
+      const existing = yield* notFound(
+        fs.realPath(absolute).pipe(Effect.map((real) => FSUtil.keepMappedDrive(absolute, real))),
+      )
       if (existing !== undefined) {
         const info = yield* fs.stat(existing)
         return {
@@ -100,7 +104,9 @@ const layer = Layer.effect(
 
       let anchor = path.dirname(absolute)
       while (true) {
-        const canonical = yield* notFound(fs.realPath(anchor))
+        const canonical = yield* notFound(
+          fs.realPath(anchor).pipe(Effect.map((real) => FSUtil.keepMappedDrive(anchor, real))),
+        )
         if (canonical !== undefined) {
           const info = yield* fs.stat(canonical)
           if (info.type !== "Directory") {

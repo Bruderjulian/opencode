@@ -94,6 +94,7 @@ export namespace FSUtil {
       const resolve = Effect.fn("FileSystem.resolve")(function* (path: string) {
         const resolved = pathResolve(windowsPath(path))
         return yield* fs.realPath(resolved).pipe(
+          Effect.map((real) => keepMappedDrive(resolved, real)),
           Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(resolved)),
           Effect.orDie,
         )
