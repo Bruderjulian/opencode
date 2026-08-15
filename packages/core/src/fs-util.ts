@@ -256,9 +256,8 @@ export namespace FSUtil {
     const resolved = pathResolve(windowsPath(p))
     try {
       return normalizePath(keepMappedDrive(resolved, realpathSync(resolved)))
-    } catch (e: any) {
-      if (process.platform === "win32" || e?.code === "ENOENT") return normalizePath(resolved)
-      throw e
+    } catch {
+      return normalizePath(resolved)
     }
   }
 

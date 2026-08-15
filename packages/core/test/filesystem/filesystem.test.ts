@@ -368,6 +368,10 @@ describe("FSUtil", () => {
       expect(FSUtil.mimeType("unknown.qzx")).toBe("application/octet-stream")
     })
 
+    test("resolve tolerates missing paths", () => {
+      expect(() => FSUtil.resolve(path.join("definitely-missing", crypto.randomUUID()))).not.toThrow()
+    })
+
     test("contains checks path containment", () => {
       expect(FSUtil.contains("/a/b", "/a/b/c")).toBe(true)
       expect(FSUtil.contains("/a/b", "/a/b")).toBe(true)
