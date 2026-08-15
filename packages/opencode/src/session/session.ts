@@ -55,14 +55,23 @@ export function isDefaultTitle(title: string) {
   ).test(title)
 }
 
+export function normalizeDirectory(directory: string): string {
+  const windows = /^[A-Za-z]:/.test(directory) || directory.startsWith("\\\\")
+  const normalized = windows ? directory.replaceAll("\\", "/") : directory
+  if (/^\/+$/.test(normalized)) return "/"
+  const drive = normalized.match(/^([A-Za-z]:)\/*$/)
+  if (drive) return `${drive[1]}/`
+  const trimmed = normalized.replace(/\/+$/, "")
+  return trimmed || "/"
+}
+
 export function directoryMatchCondition(directory: string): SQL {
-  if (process.platform !== "win32") return eq(SessionTable.directory, directory)
-  const alternatives = [directory]
+  if (process.platform !== "win32") return eq(SessionTable.directory, normalizeDirectory(directory))
+  const alternatives = [directory, normalizeDirectory(directory)]
   try {
     const real = realpathSync(directory)
     if (real !== directory && !alternatives.includes(real)) alternatives.push(real)
   } catch {}
-  if (alternatives.length === 1) return eq(SessionTable.directory, directory)
   return or(...alternatives.map((d) => eq(SessionTable.directory, d)))!
 }
 
@@ -528,7 +537,7 @@ const layer: Layer.Layer<
         slug: Slug.create(),
         version: InstallationVersion,
         projectID: ctx.project.id,
-        directory: input.directory,
+        directory: normalizeDirectory(input.directory),
         path: input.path,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
@@ -568,7 +577,7 @@ const layer: Layer.Layer<
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
       const conditions: SQL[] = []
-      if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
+      if (input?.directory) conditions.push(directoryMatchCondition(input.directory))
       if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
       if (input?.start) conditions.push(gte(SessionTable.time_updated, input.start))
       if (input?.cursor) conditions.push(lt(SessionTable.time_updated, input.cursor))

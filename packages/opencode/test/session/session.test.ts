@@ -1,9 +1,9 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { Deferred, Effect, Exit, Layer } from "effect"
-import { Session as SessionNs } from "@/session/session"
+import { Session as SessionNs, normalizeDirectory } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -43,6 +43,26 @@ const awaitDeferred = <T>(deferred: Deferred.Deferred<T>, message: string) =>
   )
 
 const remove = (id: SessionID) => SessionNs.use.remove(id)
+
+describe("normalizeDirectory", () => {
+  test("strips trailing slashes", () => {
+    expect(normalizeDirectory("/tmp/demo///")).toBe("/tmp/demo")
+    expect(normalizeDirectory("C:\\tmp\\demo\\\\")).toBe("C:/tmp/demo")
+    expect(normalizeDirectory("C:\\tmp\\demo/")).toBe("C:/tmp/demo")
+  })
+
+  test("preserves roots", () => {
+    expect(normalizeDirectory("/")).toBe("/")
+    expect(normalizeDirectory("///")).toBe("/")
+    expect(normalizeDirectory("C:\\")).toBe("C:/")
+    expect(normalizeDirectory("C://")).toBe("C:/")
+    expect(normalizeDirectory("C:")).toBe("C:/")
+  })
+
+  test("keeps non-Windows paths with literal backslashes intact", () => {
+    expect(normalizeDirectory("/home/user/weird\\dir")).toBe("/home/user/weird\\dir")
+  })
+})
 
 describe("session.created event", () => {
   it.instance("should emit session.created event when session is created", () =>
