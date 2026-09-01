@@ -4,90 +4,176 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. 1.16.2-fork.1). Defaults to package.json version + short SHA."
+        description: "Release version. Leave empty to use <package-version>-Windows"
         required: false
         type: string
       create_release:
-        description: "Create a GitHub release"
-        required: false
-        type: boolean
+        description: "Create or update the GitHub release for this build."
+        required: true
         default: true
+        type: boolean
+
+# Prevent two manual runs from concurrently publishing the same version.
+concurrency:
+  group: build-release-windows-${{ github.ref }}-${{ inputs.version || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
 
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        shell: bash
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          if [[ -n "$INPUT_VERSION" ]]; then
+            VERSION="${INPUT_VERSION}-win"
           else
-            PKG_VERSION=$(bun -e "console.log(require('./packages/opencode/package.json').version)")
-            SHORT_SHA=$(git rev-parse --short HEAD)
-            echo "version=${PKG_VERSION}-fork.${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            PKG_VERSION="$(bun -e "console.log(require('./packages/opencode/package.json').version)")"
+            SHORT_SHA="$(git rev-parse --short HEAD)"
+            VERSION="${PKG_VERSION}-win"
           fi
+
+          # Release tags are prefixed with "v". Reject values that could
+          # produce an invalid tag or unexpected shell behavior.
+          if [[ ! "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using version: $VERSION"
 
       - name: Install dependencies
         run: bun install
 
       - name: Install cross-platform native modules
+        working-directory: packages/opencode
+        shell: bash
         run: |
-          cd packages/opencode
-          bun install --os="*" --cpu="*" @opentui/core@$(bun -e "console.log(require('./package.json').dependencies['@opentui/core'])")
-          bun install --os="*" --cpu="*" @parcel/watcher@$(bun -e "console.log(require('./package.json').dependencies['@parcel/watcher'])")
+          set -euo pipefail
+
+          OPENTUI_VERSION="$(bun -e "console.log(require('./package.json').dependencies['@opentui/core'])")"
+          PARCEL_WATCHER_VERSION="$(bun -e "console.log(require('./package.json').dependencies['@parcel/watcher'])")"
+
+          bun install --os="*" --cpu="*" "@opentui/core@${OPENTUI_VERSION}"
+          bun install --os="*" --cpu="*" "@parcel/watcher@${PARCEL_WATCHER_VERSION}"
 
       - name: Build all targets
-        run: |
-          cd packages/opencode
-          bun run script/build.ts --skip-install
+        working-directory: packages/opencode
         env:
           OPENCODE_VERSION: ${{ steps.version.outputs.version }}
+        run: bun run script/build.ts --skip-install
 
       - name: Package Windows artifacts
+        working-directory: packages/opencode/dist
+        shell: bash
         run: |
-          cd packages/opencode/dist
-          for dir in opencode-windows-*/; do
-            name="${dir%/}"
-            tar -czf "${name}.tar.gz" -C "$dir" .
+          set -euo pipefail
+          shopt -s nullglob
+
+          targets=(
+            "opencode-windows-x64"
+            "opencode-windows-x64-baseline"
+            "opencode-windows-arm64"
+          )
+
+          for target in "${targets[@]}"; do
+            if [[ ! -d "$target" ]]; then
+              echo "Missing build output: $target"
+              exit 1
+            fi
+
+            tar -czf "${target}.tar.gz" -C "$target" .
           done
 
-      - name: Upload Windows x64
-        uses: actions/upload-artifact@v4
+          echo "Packaged artifacts:"
+          ls -lh ./*.tar.gz
+
+      - name: Verify Windows artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifacts=(
+            packages/opencode/dist/opencode-windows-x64.tar.gz
+            packages/opencode/dist/opencode-windows-x64-baseline.tar.gz
+            packages/opencode/dist/opencode-windows-arm64.tar.gz
+          )
+
+          for artifact in "${artifacts[@]}"; do
+            if [[ ! -s "$artifact" ]]; then
+              echo "Missing or empty artifact: $artifact"
+              exit 1
+            fi
+          done
+
+      - name: Upload Windows x64 artifact
+        uses: actions/upload-artifact@v6
         with:
           name: opencode-windows-x64
-          path: packages/opencode/dist/opencode-windows-x64/
+          path: packages/opencode/dist/opencode-windows-x64.tar.gz
+          if-no-files-found: error
 
-      - name: Upload Windows x64-baseline
-        uses: actions/upload-artifact@v4
+      - name: Upload Windows x64-baseline artifact
+        uses: actions/upload-artifact@v6
         with:
           name: opencode-windows-x64-baseline
-          path: packages/opencode/dist/opencode-windows-x64-baseline/
+          path: packages/opencode/dist/opencode-windows-x64-baseline.tar.gz
+          if-no-files-found: error
 
-      - name: Upload Windows arm64
-        uses: actions/upload-artifact@v4
+      - name: Upload Windows arm64 artifact
+        uses: actions/upload-artifact@v6
         with:
           name: opencode-windows-arm64
-          path: packages/opencode/dist/opencode-windows-arm64/
+          path: packages/opencode/dist/opencode-windows-arm64.tar.gz
+          if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: inputs.create_release
+      - name: Create or update GitHub Release
+        if: ${{ inputs.create_release }}
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
         run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          gh release create "$TAG" \
-            --title "opencode $TAG (Windows)" \
-            --notes "Windows build from \`${{ github.ref_name }}\` @ $(git rev-parse --short HEAD)" \
-            --target "${{ github.sha }}" \
-            packages/opencode/dist/opencode-windows-x64.tar.gz \
-            packages/opencode/dist/opencode-windows-x64-baseline.tar.gz \
+          set -euo pipefail
+
+          TAG="v${VERSION}"
+
+          ASSETS=(
+            packages/opencode/dist/opencode-windows-x64.tar.gz
+            packages/opencode/dist/opencode-windows-x64-baseline.tar.gz
             packages/opencode/dist/opencode-windows-arm64.tar.gz
+          )
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing Windows assets."
+
+            gh release upload "$TAG" \
+              "${ASSETS[@]}" \
+              --clobber
+          else
+            echo "Creating release $TAG."
+
+            gh release create "$TAG" \
+              --title "opencode $TAG (Windows)" \
+              --notes "Windows build from \`${GITHUB_REF_NAME}\` @ \`$(git rev-parse --short HEAD)\`" \
+              --target "$GITHUB_SHA" \
+              "${ASSETS[@]}"
+          fi
